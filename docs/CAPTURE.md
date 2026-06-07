@@ -1,122 +1,129 @@
-# Capture HTTPS Traffic Notion AI via DevTools
+# Capturing Notion AI Traffic — Historical / Manual Reference
 
-Notion desktop adalah Electron app — DevTools built-in bisa dibuka lewat
-`Ctrl+Shift+I` (kadang `View → Toggle Developer Tools`). Dari situ kita bisa
-lihat endpoint AI, headers, body, dan response.
+> **Status: LEGACY.** The flow-setup.bat script automates everything
+> described here. This document is kept as a reference for understanding
+> what the bridge does under the hood, and for manual debugging if
+> flow-setup.bat ever fails. You should NOT need to follow these steps
+> manually — just run `.\flow-setup.bat`.
 
-## Langkah 1 — Buka DevTools
+---
+
+## What the bridge captures
+
+When `flow-setup.bat` runs, it:
+
+1. Launches a real Microsoft Edge (Chromium 148) via Puppeteer
+2. Navigates to `https://app.notion.com`
+3. Waits up to 5 minutes for you to log in (detects via `token_v2` cookie)
+4. Captures:
+   - `notion_user_id` cookie → `notion.userId`
+   - All cookies as a header string → `browser.cookies`
+   - `x-notion-space-id` from the first `/api/v3/...` request
+     header → `notion.workspaceId`
+5. Generates a random `sk-bridge-...` API key → `server.apiKey`
+6. Writes `config.json`
+
+For switching workspaces after initial setup, run `flow-switch-workspace.bat`.
+
+---
+
+## Manual capture (only if flow-setup.bat is broken)
+
+If `flow-setup.bat` ever fails to capture the right values, you can do
+it manually with Notion's DevTools. Useful for understanding what the
+script does or for debugging.
+
+### 1. Buka DevTools di Notion desktop
 
 1. Pastikan **Notion desktop** sudah jalan dan kamu **sudah login** ke workspace
-2. Klik di area kosong Notion (jangan di halaman yang ada AI, supaya tidak
-   trigger request duluan)
+2. Klik di area kosong Notion
 3. Tekan **`Ctrl+Shift+I`**
 4. Pindah ke tab **Network**
-5. Centang **"Preserve log"** (supaya request tidak hilang saat reload)
+5. Centang **"Preserve log"**
 6. Filter: ketik `ai` atau `notion` di kotak filter
 
-## Langkah 2 — Trigger AI request
+### 2. Trigger AI request
 
 1. Buka halaman Notion **yang ada blok Notion AI** (atau klik tombol `Ask AI`)
 2. Kirim prompt pendek, mis. "Halo, apa kabar?"
-3. Tunggu sampai response AI muncul di halaman
-4. Di DevTools Network, akan muncul beberapa request dengan path mengandung
-   `ai`, `aiProxy`, `runAsync`, `completion`, atau `transactions`
+3. Tunggu sampai response AI muncul
+4. Di DevTools Network, akan muncul request dengan path mengandung
+   `runInferenceTranscript`, `getAvailableModels`, atau `getSpaces`
 
-## Langkah 3 — Identifikasi request AI yang benar
+### 3. Identifikasi request yang benar
 
-Dari daftar request, cari yang:
+Cari yang:
 - **Method**: `POST`
 - **URL**: `https://www.notion.so/api/v3/...` atau `https://app.notion.com/api/v3/...`
 - **Status**: `200`
-- **Size**: response > 1 KB (artinya ada konten AI)
-- **Initiator**: `notion-ai` atau stack frame mengandung `ai`
+- **Size**: response > 1 KB
 
 Klik request itu. Di panel kanan, ambil:
 
-### Headers (yang penting)
-
+#### Headers (yang penting)
 ```
-:authority: www.notion.so
-:method: POST
-:path: /api/v3/.......
-content-type: application/json
-x-notion-active-user-header: 376d872b-594c-8175-8c79-000207773147
-x-notion-workspace-header: 78dddff2-b00e-814e-9e55-00030f79b66f
-cookie: ... (akan panjang, salin semua)
-notion-audit-log-platform: desktop
-notion-client-version: ...
-notion-api-version: ...
+x-notion-active-user-header: <userId>
+x-notion-space-id:           <workspaceId>
+notion-client-version:       23.13.20260606.0807  (or current)
+notion-audit-log-platform:   web
+cookie:                       <long string — the cookies>
 ```
 
-**Salin semua header**. Yang paling kritis:
-- `cookie` (session token)
-- `x-notion-active-user-header`
-- `x-notion-workspace-header`
-- `notion-client-version`
-- `notion-api-version`
+Yang paling kritis: `cookie` (full string), `x-notion-active-user-header`,
+`x-notion-space-id`, `notion-client-version`.
 
-### Request Payload (tab "Payload" atau "Request")
+#### Response (untuk verifikasi)
 
-Salin JSON body lengkap. Akan ada field seperti:
-- `type` (mis. `"block"`, `"inline"`, atau nama action)
-- `commands` atau `transaction` (isi request ke Notion)
-- `surface`, `context`, dll
+- `application/x-ndjson` → line-delimited JSON events. Cari yang
+  `type: "agent-inference"` di `recordMap.thread_message` — itu text
+  panjang dari AI.
 
-### Response (tab "Response" atau "Preview")
+### 4. Format config.json manual
 
-Salin JSON response. Biasanya berisi:
-- `recordVal` atau `results` dengan block AI yang sudah terisi
-- Streaming chunks (kalau pakai `text/event-stream` akan ada baris `data: {...}`)
+Setelah dapet values, edit `config.json`:
 
-## Langkah 4 — Cek apakah streaming
-
-Di tab **Headers**, lihat `content-type` response:
-- `application/json` → request biasa, semua response datang sekaligus
-- `text/event-stream` → streaming (kita akan parse line `data: {json}`)
-
-## Langkah 5 — Simpan hasil capture
-
-Buat folder `capture/` di project ini, lalu save 3 file:
-
-```bash
-mkdir -p capture
+```json
+{
+  "notion": {
+    "endpoint": "https://app.notion.com/api/v3/runInferenceTranscript",
+    "userId": "PASTE_USER_ID_HERE",
+    "workspaceId": "PASTE_WORKSPACE_ID_HERE",
+    "clientVersion": "PASTE_VERSION_HERE"
+  },
+  "browser": {
+    "cookies": "PASTE_FULL_COOKIE_STRING_HERE"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "apiKey": "sk-bridge-CHANGE_ME_TO_RANDOM"
+  }
+}
 ```
 
-Simpan sebagai:
-- `capture/ai-request-headers.txt` — semua header dari request
-- `capture/ai-request-body.json` — body request (JSON, pretty-print)
-- `capture/ai-response-body.json` — body response (JSON, pretty-print)
-- `capture/ai-response-stream.txt` — kalau streaming, full response body
+Then run `flow.bat` to start the bridge.
 
-## Langkah 6 — Ambil token (kalau mau skip DPAPI extractor)
-
-Dari `cookie` header, cari cookie `token_v2=...` (nilai ini panjang, ~100
-karakter, format `v03%3A...` atau `v03:` lalu base64-ish). Simpan ke
-`capture/notion-token.txt` (1 baris, tanpa newline).
-
-Field `token_v2` ini = session token yang dipakai untuk auth ke Notion API.
-
-## Langkah 7 — Kirim hasil ke assistant
-
-Setelah capture selesai, paste ke chat:
-- Endpoint path exact (mis. `/api/v3/runAsyncAITransaction`)
-- 1 baris header penting (`x-notion-client-version`, `notion-api-version`)
-- 1 cuplikan kecil body request (50-100 baris pertama JSON)
-- 1 cuplikan kecil body response (50-100 baris pertama JSON)
-- `token_v2=...` (kalau sudah extract manual)
-
-Dari situ saya akan:
-1. Implement parser `openai-to-notion.js` dengan endpoint + format yang benar
-2. Test bridge end-to-end
-3. Tulis MITM handler `notion.js` untuk 9router
+---
 
 ## Tips tambahan
 
 - **Kalau ada banyak request AI** saat 1 prompt: yang pertama biasanya
-  "create transaction", yang kedua "stream completion". Ambil **yang kedua**
-  untuk lihat body completion.
+  "config accept", yang kedua "record-map sync". Cari yang response-nya
+  > 1 KB.
 - **Reload halaman Notion** sebelum capture supaya lebih bersih.
 - **Gunakan workspace + user yang berbeda** (akun tumbal) untuk capture,
   supaya kalau kena limit tidak mengganggu workspace utama.
-- **Notion kadang update endpoint** setiap 4-8 minggu. Kalau bridge tiba-tiba
-  error, ulangi capture.
+- **Notion kadang update endpoint** setiap 4-8 minggu. Capture ulang
+  (atau re-run flow-setup.bat) kalau bridge tiba-tiba error.
+- **bridge `flow-switch-workspace.bat`** lebih cepat daripada re-capture
+  penuh — pakai itu untuk ganti workspace, bukan re-run flow-setup.
+
+## Yang TIDAK boleh di-capture manual
+
+- ❌ Jangan set `User-Agent`, `Referer`, atau `Cookie` di header manual —
+  ini "forbidden header names" di browser, di-drop silently. Cukup
+  biarkan browser inject dari session.
+- ❌ Jangan set `Content-Type` manual selain `application/json` di
+  `runInferenceTranscript` — Notion validate dan reject kalo beda.
+- ❌ Jangan pakai `fetch` dari Node.js tanpa puppeteer — trust rule
+  reject karena TLS fingerprint mismatch.
