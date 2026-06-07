@@ -21,21 +21,26 @@ AI agent (Kilo, Claude Code, Cursor, …)
       Notion AI (your logged-in account)
 ```
 
-## TL;DR (3 commands)
+## TL;DR (4 commands)
 
 ```powershell
-git clone <this-repo>
-cd <repo-folder>
+git clone https://github.com/pixelbrow720/flow-ai.git
+cd flow-ai
 .\flow-setup.bat          # opens Edge, you log in, config auto-captured
 .\flow.bat                # starts the bridge on :8787
 ```
+
+When `flow-setup.bat` finishes it prints an **API key** like
+`sk-bridge-1a2b3c4d5e6f7890abcdef1234567890`. **Copy it** — you'll paste
+it into your AI agent's config. (You can always read it back later from
+`config.json` → `server.apiKey`.)
 
 Then in your AI agent:
 
 ```
 Base URL:  http://127.0.0.1:8787/v1
-API Key:   <printed by flow-setup.bat>
-Model:     notion/opus-4.8    (or any of 19 — see table below)
+API Key:   sk-bridge-1a2b3c4d5e6f7890abcdef1234567890   (yours, from flow-setup)
+Model:     notion/opus-4.8     (or any of 19 — see table below)
 ```
 
 That's it. No manual cookie copy-pasting, no DevTools, no JSON editing.
@@ -104,16 +109,38 @@ Refresh the list any time: `curl http://127.0.0.1:8787/v1/admin/notion-models -H
 
 ## One-time setup (Windows)
 
-1. **Clone this repo.**
-2. **Double-click `flow-setup.bat`.** It will:
+1. **Clone this repo** in PowerShell or Command Prompt:
+   ```powershell
+   git clone https://github.com/pixelbrow720/flow-ai.git
+   cd flow-ai
+   ```
+   The folder will be called `flow-ai` (matches the GitHub repo name).
+   You can rename it to whatever you like — the scripts use `%~dp0`
+   so they find themselves relative to their own location.
+
+2. **Double-click `flow-setup.bat`** (or run it from the terminal). It will:
    - Check Node.js and Edge are installed.
-   - Run `npm install` if `node_modules/` is missing.
+   - Run `npm install` if `node_modules/` is missing (one-time, ~1 min).
    - Launch a real Edge window at `app.notion.com`.
    - Wait for you to **log in to your Notion account** in that window.
+     (You have 5 minutes to complete the login.)
    - Capture your cookies, user ID, and workspace ID from the browser session.
    - Generate an API key, write `config.json` to your local disk.
-   - Print the API key to the console — **save it**, you'll need it in your agent.
-3. The script will tell you to double-click `flow.bat` next. Do that.
+   - Print the API key to the console — **copy it**, you'll need it in your agent.
+     (If you forget, it's also in `config.json` under `server.apiKey`.)
+
+3. **Double-click `flow.bat`** to start the bridge.
+
+### What to do with the API key
+
+The API key is a random secret the bridge requires so only your AI
+agent can call it. Three things to know:
+
+- **Use it in your AI agent** (Kilo / Claude Code / Cursor / 9router / …) as
+  the OpenAI provider's API key.
+- **Don't share it** with anyone else on your machine.
+- **To find it again later**: read `config.json` → `server.apiKey` in any
+  text editor. It's a string like `sk-bridge-xxxxxxxxxxxxxxxxxxxxxxxxxxxx`.
 
 **macOS / Linux:** run `node flow-setup.js` and `node src/server.js` directly
 from a terminal in the repo folder. The `userDataDir` for the puppeteer
@@ -130,6 +157,27 @@ match your platform if you're not on Windows.
 | `flow-logs.bat`    | **Tail `server.log`.** Useful when debugging.                        |
 
 **To stop everything:** close the `9router` window + double-click `flow-stop.bat`.
+
+## Verify it works (60 seconds)
+
+After `flow.bat` shows "Ready", open a **second** terminal in the same
+folder and run these to confirm the bridge is healthy and reachable:
+
+```powershell
+# 1. Bridge health (should print JSON with status:ok)
+curl http://127.0.0.1:8787/health
+
+# 2. List of 19 models the bridge exposes
+curl http://127.0.0.1:8787/v1/models -H "Authorization: Bearer YOUR_API_KEY"
+
+# 3. Real chat — 2+2 should come back as 4 in ~6s
+$KEY = (Get-Content config.json | ConvertFrom-Json).server.apiKey
+$body = '{"model":"notion/opus-4.8","messages":[{"role":"user","content":"What is 2+2? Just the number."}]}'
+curl http://127.0.0.1:8787/v1/chat/completions -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d $body
+```
+
+If all three return successfully, you're done. Point your AI agent at
+`http://127.0.0.1:8787/v1` with the API key and start calling models.
 
 ## Using from an AI agent
 
