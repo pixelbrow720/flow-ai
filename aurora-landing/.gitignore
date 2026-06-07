@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log*
+.npm/
+
+# flowai runtime
+.flowai.pid
+config.json
+server.log
+server.err
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/

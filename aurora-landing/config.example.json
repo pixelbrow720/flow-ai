@@ -1,0 +1,16 @@
+{
+  "notion": {
+    "endpoint": "https://app.notion.com/api/v3/runInferenceTranscript",
+    "userId": "PUT-YOUR-NOTION-USER-ID-HERE",
+    "workspaceId": "PUT-YOUR-WORKSPACE-ID-HERE",
+    "clientVersion": "23.13.20260605.1144"
+  },
+  "browser": {
+    "cookies": "PUT-YOUR-VERY-LONG-COOKIE-STRING-HERE"
+  },
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8787,
+    "apiKey": "PUT-ANY-RANDOM-PASSWORD-HERE"
+  }
+}

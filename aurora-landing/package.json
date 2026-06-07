@@ -1,0 +1,35 @@
+{
+  "name": "flowai",
+  "version": "1.0.0",
+  "description": "Notion AI as a local OpenAI-compatible LLM provider for AI agents (Kilo, Claude Code, Codex, etc.)",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "keywords": [
+    "notion",
+    "notion-ai",
+    "openai-compatible",
+    "ai-agent",
+    "kilo",
+    "claude-code",
+    "codex",
+    "llm-provider"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "puppeteer-core": "^23.0.0"
+  },
+  "files": [
+    "src/",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "license": "MIT"
+}
