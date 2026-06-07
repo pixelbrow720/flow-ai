@@ -149,14 +149,46 @@ match your platform if you're not on Windows.
 
 ## Daily use (Windows)
 
-| Script             | What it does                                                         |
-|--------------------|----------------------------------------------------------------------|
-| `flow-setup.bat`   | **One-time** per machine. Captures your Notion session into `config.json`. |
-| `flow.bat`         | **Start the bridge.** Auto-starts 9router if installed, then starts the bridge on :8787. Idempotent (safe to double-click). |
-| `flow-stop.bat`    | **Stop the bridge.** Reads `bridge.pid` and kills that process only. Won't touch 9router. |
-| `flow-logs.bat`    | **Tail `server.log`.** Useful when debugging.                        |
+| Script                       | What it does                                                         |
+|------------------------------|----------------------------------------------------------------------|
+| `flow-setup.bat`             | **One-time** per machine. Captures your Notion session into `config.json`. |
+| `flow-switch-workspace.bat`  | **Switch which Notion workspace** the bridge targets. Lists your workspaces with their plan + AI status, you pick one, `config.json` updates, bridge restarts. |
+| `flow.bat`                   | **Start the bridge.** Auto-starts 9router if installed, then starts the bridge on :8787. Idempotent (safe to double-click). |
+| `flow-stop.bat`              | **Stop the bridge.** Reads `bridge.pid` and kills that process only. Won't touch 9router. |
+| `flow-logs.bat`              | **Tail `server.log`.** Useful when debugging.                        |
 
 **To stop everything:** close the `9router` window + double-click `flow-stop.bat`.
+
+## Multiple workspaces (Business / Personal / Free / Trial)
+
+If you have more than one Notion workspace in your account and only
+some of them have AI access, run **`flow-switch-workspace.bat`** to pick
+the one the bridge should target. It shows a numbered list with each
+workspace's plan, trial status, and AI entitlement, then updates
+`config.json` and restarts the bridge for you.
+
+Example output:
+
+```
+Your Notion workspaces:
+
+  [ 1]  ayyubi susilo's Space  << current
+          plan: team (tier: business) - credit override: 200 (29d left) - AI enabled
+
+  [ 2]  ayyubi susilo's Space
+          plan: personal (tier: free) - AI enabled
+
+Pick workspace number (or q to quit):
+```
+
+Workspaces with `- no AI` will return `trust-rule-denied` on every call,
+so don't switch to them unless you're debugging. The script warns you
+before letting you pick a non-AI workspace.
+
+Cookies are per-account (login once covers all your workspaces), so
+`flow-switch-workspace.bat` doesn't need a fresh login — it just
+re-runs `getSpaces` with your existing session and updates the
+`workspaceId` field in `config.json`.
 
 ## Verify it works (60 seconds)
 
@@ -225,6 +257,8 @@ bridge with other LLM providers:
 │   └── RESEARCH.md
 ├── flow-setup.bat             First-time setup: open Edge, capture cookies, write config.json
 ├── flow-setup.js              Node script backing flow-setup.bat
+├── flow-switch-workspace.bat  Switch active Notion workspace (multi-workspace accounts)
+├── flow-switch-workspace.js   Node script backing flow-switch-workspace.bat
 ├── flow.bat                   Start bridge (+ auto-start 9router if installed)
 ├── flow-stop.bat              Stop bridge by PID
 ├── flow-logs.bat              Tail server.log
@@ -306,6 +340,11 @@ to match.
 9router isn't installed or `9router` isn't on PATH / not in `C:\Users\ollama\`.
 The bridge will still start, but Kilo routing via 9router won't work
 until 9router is up. The bridge alone is still useful for direct calls.
+
+### Bridge returns `trust-rule-denied` after switching workspaces
+The workspace you switched to doesn't have AI on its plan (free tier,
+or AI not enabled in workspace settings). Run `flow-switch-workspace.bat`
+again and pick a workspace with `- AI enabled`.
 
 ## Limitations
 
