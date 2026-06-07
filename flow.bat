@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "PORT=8787"
@@ -11,6 +11,21 @@ echo.
 echo === Notion-AI-Bridge launcher ===
 echo Project: %ROOT%
 echo.
+
+REM ── Install deps if needed (one-time per clone) ─────────────────────────
+if not exist "%ROOT%\node_modules" (
+    echo node_modules missing. Running npm install one-time ...
+    pushd "%ROOT%"
+    call npm install
+    set "RC=!errorlevel!"
+    popd
+    if not "!RC!"=="0" (
+        echo npm install failed.
+        pause
+        exit /b !RC!
+    )
+    echo.
+)
 
 REM ── 9router: start if not already listening ─────────────────────────────
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
