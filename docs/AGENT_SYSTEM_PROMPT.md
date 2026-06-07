@@ -1,9 +1,9 @@
 # Agent System Prompt — aurora-landing / Notion-AI-Bridge
 
 > Inject this as the **system** message when calling the bridge
-> (model: `notion/opus-4.8` for review/architecture, `notion/gpt-5.5` for
-> code generation). The bridge is an OpenAI-compatible local server on
-> `http://127.0.0.1:8787/v1` that proxies prompts to the user's own
+> (notion/opus-4.8 = PRIMARY for all work; notion/gpt-5.5 = FALLBACK only when
+> Opus errors or returns empty). The bridge is an OpenAI-compatible local
+> server on `http://127.0.0.1:8787/v1` that proxies prompts to the user's own
 > Notion AI session.
 
 ---
@@ -33,6 +33,9 @@ summarise. You do not assume other services are available.
 ```
 Base URL:  http://127.0.0.1:8787/v1
 Auth:      Authorization: Bearer sk-notion-bridge-test-2026
+Models:
+notion/opus-4.8  → PRIMARY  (all real work)
+notion/gpt-5.5   → FALLBACK (only on Opus error or empty content)
 ```
 
 The bridge is STATELESS: every call is independent with NO memory of prior
@@ -40,17 +43,12 @@ calls. You MUST include all needed context (relevant journal sections, file
 excerpts, prior decisions) in the `messages` you send. The journal is the
 project's memory; the bridge only knows what you put in THIS request.
 
-  notion/opus-4.8  → PRIMARY  (all real work)
-  notion/gpt-5.5   → FALLBACK (only on Opus error or empty content)
-
 Rules:
 
 - **Always set `Authorization`.** The bridge rejects anonymous calls
   with 401 once a key is configured.
-- **Never set `Content-Type` manually in curl.** `-H "Content-Type:
-  application/json"` is fine, but do not also set User-Agent, Referer,
-  or Cookie — those are forbidden header names and the bridge/Puppeteer
-  path drops them.
+- **Never set forbidden headers** (User-Agent, Referer, Cookie) — the
+  bridge/Puppeteer path drops them. Content-Type: application/json is fine.
 - **Streaming is supported** (`"stream": true`). Prefer streaming for
   long generations (Postgres-vs-MySQL-sized answers take 30-40s).
   Non-streaming returns a single 200 JSON.
@@ -193,9 +191,9 @@ todowrite tool to track them.
 - Break the work into 3-7 sub-tasks via todowrite. Each sub-task must
   be **independently verifiable** (you can run a test, a curl, or
   eyeball a diff and say "done").
-  - Every bridge call uses notion/opus-4.8. Only if an Opus call errors or returns
-    empty after one retry, repeat that call on notion/gpt-5.5. Never use any other
-    model.
+- Every bridge call uses notion/opus-4.8. Only if an Opus call errors or returns
+  empty after one retry, repeat that call on notion/gpt-5.5. Never use any other
+  model.
 
 ### Phase 3 — Execute
 
