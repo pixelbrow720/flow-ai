@@ -30,7 +30,12 @@ Base URL:  http://127.0.0.1:8787/v1
 Auth:      Authorization: Bearer sk-notion-bridge-test-2026
 ```
 
-Notion exposes **19 internal model ids** spanning 5 families (Anthropic,
+The bridge is STATELESS: every /v1/chat/completions call is independent and has
+NO memory of prior calls. You MUST include all needed context (relevant journal
+sections, file excerpts, prior decisions) in the `messages` you send. The journal
+is the project's memory; the bridge only knows what you put in THIS request.
+
+Notion exposes **16 internal model ids** spanning 5 families (Anthropic,
 OpenAI, Gemini, xAI, plus proxied third-party). The bridge maps friendly
 aliases to the right internal id so you can call models by the name
 Notion shows in its UI. Full table:
@@ -86,9 +91,11 @@ Rules:
 - **Streaming is supported** (`"stream": true`). Prefer streaming for
   long generations (Postgres-vs-MySQL-sized answers take 30-40s).
   Non-streaming returns a single 200 JSON.
-- **Empty `content: ""` means the parser couldn't extract text.**
-  Retry once after 2s; if still empty, the bridge is probably
-  trust-rule-denied → re-launch the bridge (`node src/server.js`).
+- Empty `content: ""` means the parser couldn't extract text. Retry once after
+  2s. If still empty, fall back to a DIFFERENT-FAMILY alias (e.g. opus-4.8 →
+  gpt-5.5) before relaunching: a real bridge outage breaks ALL aliases, but a
+  model-specific hiccup won't. Only if the fallback is also empty, relaunch the
+  bridge (`node src/server.js`).
 
 Sample call (PowerShell):
 
@@ -158,8 +165,15 @@ Rules:
   not only at session end. A "sub-task" is a single `todowrite` item
   that flips from `pending` to `completed`. Re-write the whole file
   (atomic write: write to `.tmp`, rename) — never `append`.
-- **Use the bridge** to summarise sub-task outcomes into one line
-  when the outcome is non-obvious. Self-summarise when trivial.
+  - The LOCAL model NEVER free-writes journal prose (it is prone to hallucination
+    and to leaking non-English characters). Instead:
+    1. After verification, extract facts from the REAL repo: `git diff --stat`,
+       `git diff`, changed function signatures, and test output → a fact bundle.
+    2. Call the bridge to write the Outcome/Decision lines from ONLY that bundle,
+       with the instruction: "Document only these facts. Invent nothing. English
+       only."
+    3. Safety check: every file path and function name in the prose MUST appear in
+       the fact bundle. If not, discard and regenerate.
 - **Never delete old sections.** If a decision is reversed, append
   a new "Reversed: <reason>" line under Decisions; keep the original.
 - **Timestamps** in 24h local time, no seconds.
@@ -198,6 +212,10 @@ now and time `t`:
 - any file in CWD has mtime > `t` AND is not `.flowai/`,
   `node_modules/`, `.git/`, `*.log`, `server.err`, `bridge.pid`
 
+Note: do not treat the agent's OWN uncommitted changes from a prior session as a
+reason to start a new session. Only count changes made by the USER (or a goal
+change) as "material". When unsure, default to ongoing.
+
 If neither heuristic is conclusive, **default to ongoing** (safer:
 preserves the user's previous context).
 
@@ -222,12 +240,12 @@ todowrite tool to track them.
 - Break the work into 3-7 sub-tasks via todowrite. Each sub-task must
   be **independently verifiable** (you can run a test, a curl, or
   eyeball a diff and say "done").
-- For each sub-task, name the bridge model you will use:
-  - `notion/opus-4.8` for: design choices, reviewing existing code,
-    debugging root causes, security/architecture trade-offs
-  - `notion/gpt-5.5` for: writing new code, refactors, test bodies
-  - `notion/sonnet-4` for: short text (commit messages, one-liner
-    explanations)
+  - For each sub-task, pick the model via the §1 routing table (the "Use for"
+    column) — that table is the ONLY routing authority; do not duplicate routing
+    rules here.
+  - Default to a FAST model. Escalate to `notion/opus-4.8` ONLY for genuinely hard
+    reasoning (Opus is the slowest, speed:2). Use `notion/sonnet-4.6` for balanced
+    work and `notion/haiku-4.5` / `notion/gpt-5.4-nano` for cheap short text.
 
 ### Phase 3 — Execute
 
@@ -282,3 +300,7 @@ todowrite tool to track them.
   over "this should work".
 - One-line summaries for routine completions; one paragraph max for
   session end. Save long prose for the journal.
+- Language: English for code, journal, commits, and config; Indonesian when
+  addressing the user directly.
+- NEVER output Chinese/Mandarin (or any non-English) characters anywhere in code
+  or journal. If a model returns any, regenerate or strip them before saving.
