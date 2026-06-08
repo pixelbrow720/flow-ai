@@ -34,6 +34,11 @@
 import { randomUUID } from "node:crypto";
 import { sendToNotion, streamNotionResponse } from "./notion-client.js";
 import { debug, err } from "./logger.js";
+import {
+  buildToolInstructions,
+  formatToolCallsAsText,
+  parseToolCalls,
+} from "./tool-calling.js";
 
 // ── Persona override preamble ───────────────────────────────────────────────
 // Notion's transcript has no verified authoritative "system" event, so a
@@ -193,13 +198,7 @@ function buildNotionRequestBody({ openaiReq, modelId, config }) {
         // even though we don't translate them into native Notion tool events.
         const toolCalls =
           Array.isArray(m.tool_calls) && m.tool_calls.length
-            ? "\n" +
-              m.tool_calls
-                .map(
-                  (tc) =>
-                    `→ tool_call ${tc.function?.name || tc.id}(${tc.function?.arguments || ""})`
-                )
-                .join("\n")
+            ? "\n" + formatToolCallsAsText(m.tool_calls)
             : "";
         return `${label}: ${body}${toolCalls}`;
       })
@@ -215,7 +214,13 @@ function buildNotionRequestBody({ openaiReq, modelId, config }) {
         : DEFAULT_PERSONA_OVERRIDE;
 
   // Each block becomes its own inner array in Notion's list-of-lists user value.
-  const systemBlocks = [personaOverride, systemText].filter(Boolean);
+  const toolInstructions = buildToolInstructions(
+    openaiReq.tools,
+    openaiReq.tool_choice
+  );
+  const systemBlocks = [personaOverride, toolInstructions, systemText].filter(
+    Boolean
+  );
   const userValue = systemBlocks.length
     ? [...systemBlocks.map((b) => [b]), [promptText]]
     : [[promptText]];
@@ -352,6 +357,11 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
   }
 
   const modelId = resolveModelId(openaiReq.model, config);
+  const wantsTools =
+    Array.isArray(openaiReq.tools) &&
+    openaiReq.tools.length > 0 &&
+    openaiReq.tool_choice !== "none" &&
+    config.toolCalling !== false;
   debug(`[chat] model=${openaiReq.model} → notion-id=${modelId}  stream=${!!openaiReq.stream}  mock=${!!opts.mock}`);
 
   // ── MOCK MODE ─────────────────────────────────────────────────────────────
@@ -445,6 +455,34 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
     // counts, but hard-coding 0 breaks harnesses that budget context from usage.
     const promptTokens = Math.ceil(JSON.stringify(openaiReq.messages || []).length / 4);
     const completionTokens = Math.ceil((text || "").length / 4);
+    const usage = {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    };
+    if (wantsTools) {
+      const { toolCalls, cleanedText } = parseToolCalls(text);
+      if (toolCalls.length) {
+        return res.json({
+          id: `chatcmpl-${Date.now()}`,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model: openaiReq.model,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: cleanedText || null,
+                tool_calls: toolCalls,
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+          usage,
+        });
+      }
+    }
     return res.json({
       id: `chatcmpl-${Date.now()}`,
       object: "chat.completion",
@@ -457,11 +495,7 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
           finish_reason: "stop",
         },
       ],
-      usage: {
-        prompt_tokens: promptTokens,
-        completion_tokens: completionTokens,
-        total_tokens: promptTokens + completionTokens,
-      },
+      usage,
     });
   }
 
@@ -486,30 +520,116 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
   );
 
   try {
-    for await (const textChunk of streamNotionResponse({ config, body: notionBody })) {
+    if (wantsTools) {
+      // Tool-calling needs the COMPLETE message to detect <tool_call> blocks
+      // (partial JSON mid-stream is unparseable), so buffer fully then emit.
+      let full = "";
+      for await (const textChunk of streamNotionResponse({ config, body: notionBody })) {
+        full += textChunk;
+      }
+      const { toolCalls, cleanedText } = parseToolCalls(full);
+      if (toolCalls.length) {
+        if (cleanedText) {
+          res.write(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model: openaiReq.model,
+              choices: [
+                { index: 0, delta: { content: cleanedText }, finish_reason: null },
+              ],
+            })}\n\n`
+          );
+        }
+        toolCalls.forEach((tc, i) => {
+          res.write(
+            `data: ${JSON.stringify({
+              id: completionId,
+              object: "chat.completion.chunk",
+              created,
+              model: openaiReq.model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: i,
+                        id: tc.id,
+                        type: "function",
+                        function: {
+                          name: tc.function.name,
+                          arguments: tc.function.arguments,
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: null,
+                },
+              ],
+            })}\n\n`
+          );
+        });
+        res.write(
+          `data: ${JSON.stringify({
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: openaiReq.model,
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+          })}\n\n`
+        );
+      } else {
+        res.write(
+          `data: ${JSON.stringify({
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: openaiReq.model,
+            choices: [
+              { index: 0, delta: { content: cleanedText || full }, finish_reason: null },
+            ],
+          })}\n\n`
+        );
+        res.write(
+          `data: ${JSON.stringify({
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: openaiReq.model,
+            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+          })}\n\n`
+        );
+      }
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } else {
+      for await (const textChunk of streamNotionResponse({ config, body: notionBody })) {
+        res.write(
+          `data: ${JSON.stringify({
+            id: completionId,
+            object: "chat.completion.chunk",
+            created,
+            model: openaiReq.model,
+            choices: [
+              { index: 0, delta: { content: textChunk }, finish_reason: null },
+            ],
+          })}\n\n`
+        );
+      }
       res.write(
         `data: ${JSON.stringify({
           id: completionId,
           object: "chat.completion.chunk",
           created,
           model: openaiReq.model,
-          choices: [
-            { index: 0, delta: { content: textChunk }, finish_reason: null },
-          ],
+          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
         })}\n\n`
       );
+      res.write("data: [DONE]\n\n");
+      res.end();
     }
-    res.write(
-      `data: ${JSON.stringify({
-        id: completionId,
-        object: "chat.completion.chunk",
-        created,
-        model: openaiReq.model,
-        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-      })}\n\n`
-    );
-    res.write("data: [DONE]\n\n");
-    res.end();
   } catch (e) {
     err(`[chat-stream] error: ${e.message}`);
     const classified = classifyNotionError(e);
