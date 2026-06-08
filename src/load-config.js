@@ -46,7 +46,7 @@ export const apiVersion = _n.apiVersion || _raw.apiVersion;
 
 // ── Server-side fields ─────────────────────────────────────────────────────
 export const host = _s.host || _raw.host || "127.0.0.1";
-export const port = _s.port || _raw.port || 20130;
+export const port = _s.port || _raw.port || 8787;
 
 // ── Auth (apiKey via obfuscated indexer) ───────────────────────────────────
 const _k = "api" + "Key";
@@ -136,3 +136,13 @@ export const searchScopes = _raw.searchScopes || [];
 export const debug = !!_raw.debug;
 export const mock = !!_raw.mock;
 export const bodyBuilder = typeof _raw.bodyBuilder === "function" ? _raw.bodyBuilder : null;
+
+// ── Thread behaviour knobs (machine-friendly defaults applied in builder) ──
+// Set any of these in config.json (top-level) to control workspace
+// side-effects on agentic loops:
+//   "createThread": false            // don't persist a thread per request
+//   "generateTitle": false           // don't auto-title threads (now default)
+//   "saveAllThreadOperations": false // don't save the op log
+export const createThread = _raw.createThread;
+export const generateTitle = _raw.generateTitle;
+export const saveAllThreadOperations = _raw.saveAllThreadOperations;

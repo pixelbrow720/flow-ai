@@ -19,6 +19,12 @@ import { cookieJar as cfgCookieJar } from "./load-config.js";
 const EDGE_PATHS = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+  // macOS
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  // Linux
+  "/usr/bin/microsoft-edge",
+  "/usr/bin/microsoft-edge-stable",
+  "/opt/microsoft/msedge/msedge",
 ];
 
 let browser = null;
@@ -29,10 +35,14 @@ let pageUrl = "about:blank";
  * Find Edge executable.
  */
 function findEdgePath() {
+  // Explicit override; also lets non-Windows users point at any
+  // Chromium-family binary.
+  const fromEnv = process.env.NOTION_BRIDGE_EDGE_PATH;
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
   for (const p of EDGE_PATHS) {
-    try {
-      if (readFileSync(p)) return p;
-    } catch {}
+    // existsSync — do NOT readFileSync the whole ~150MB browser binary just
+    // to test for existence.
+    if (existsSync(p)) return p;
   }
   return null;
 }
@@ -105,7 +115,7 @@ export async function initPuppeteer({ headless = true } = {}) {
 
   const ctx = browser.defaultBrowserContext();
   const cookies = loadCookies();
-  await   await ctx.setCookie(...cookies);
+  await ctx.setCookie(...cookies);
 
   page = await browser.newPage();
   await page.setUserAgent(

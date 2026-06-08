@@ -130,19 +130,67 @@ function buildNotionRequestBody({ openaiReq, modelId, config }) {
     return config.bodyBuilder({ openaiReq, modelId, config });
   }
 
-  // Extract last user message
-  const lastUserMsg = [...(openaiReq.messages || [])]
-    .reverse()
-    .find((m) => m.role === "user");
-  const promptText = typeof lastUserMsg?.content === "string"
-    ? lastUserMsg.content
-    : JSON.stringify(lastUserMsg?.content || "");
+  // ── Relay the FULL conversation, not just the last user turn ──────────────
+  // Notion's transcript "user" event is a list-of-lists. Naively sending only
+  // the last user message throws away multi-turn context + tool results, which
+  // breaks agentic loops (Kilo, Claude Code, etc.). Instead we:
+  //   • collect ALL system messages into the first inner array, and
+  //   • serialize the remaining conversation (user / assistant / tool) into a
+  //     single labelled transcript string as the second inner array.
+  // (We deliberately flatten into one prompt rather than fabricate Notion
+  //  multi-turn event types we haven't verified against the real endpoint.)
+  const allMsgs = Array.isArray(openaiReq.messages) ? openaiReq.messages : [];
 
-  // System prompt prepended (if any) — Notion's "user" event is a list-of-lists
-  const systemMsg = (openaiReq.messages || []).find((m) => m.role === "system");
-  const userValue = systemMsg
-    ? [[systemMsg.content], [promptText]]
-    : [[promptText]];
+  const asText = (content) =>
+    typeof content === "string"
+      ? content
+      : Array.isArray(content)
+        ? content
+            .map((p) => (typeof p === "string" ? p : p?.text || p?.content || ""))
+            .join("")
+        : JSON.stringify(content ?? "");
+
+  const systemText = allMsgs
+    .filter((m) => m.role === "system")
+    .map((m) => asText(m.content))
+    .filter(Boolean)
+    .join("\n\n");
+
+  const convo = allMsgs.filter((m) => m.role !== "system");
+
+  let promptText;
+  if (convo.length <= 1) {
+    // Single turn: send it bare (cleanest for one-shot prompts).
+    promptText = asText(convo[convo.length - 1]?.content);
+  } else {
+    // Multi-turn: render a labelled transcript so the model sees full history.
+    promptText = convo
+      .map((m) => {
+        const label =
+          m.role === "assistant"
+            ? "Assistant"
+            : m.role === "tool"
+              ? `Tool${m.name ? ` (${m.name})` : ""}`
+              : "User";
+        const body = asText(m.content);
+        // Surface OpenAI tool_calls as text so the model can follow the loop
+        // even though we don't translate them into native Notion tool events.
+        const toolCalls =
+          Array.isArray(m.tool_calls) && m.tool_calls.length
+            ? "\n" +
+              m.tool_calls
+                .map(
+                  (tc) =>
+                    `→ tool_call ${tc.function?.name || tc.id}(${tc.function?.arguments || ""})`
+                )
+                .join("\n")
+            : "";
+        return `${label}: ${body}${toolCalls}`;
+      })
+      .join("\n\n");
+  }
+
+  const userValue = systemText ? [[systemText], [promptText]] : [[promptText]];
 
   // Merge user workflow config with defaults
   const wf = { ...DEFAULT_WORKFLOW_CONFIG, ...(config.workflowConfig || {}) };
@@ -203,10 +251,13 @@ function buildNotionRequestBody({ openaiReq, modelId, config }) {
       id: config.workspaceId,
       spaceId: config.workspaceId,
     },
-    createThread: true,
+    createThread: config.createThread ?? true,
     debugOverrides: DEFAULT_DEBUG_OVERRIDES,
-    generateTitle: true,
-    saveAllThreadOperations: true,
+    // Default off: on agentic loops every call would otherwise spawn an
+    // auto-titled thread in your workspace (noise + AI credits). Flip via
+    // config.json "generateTitle": true if you want titles back.
+    generateTitle: config.generateTitle ?? false,
+    saveAllThreadOperations: config.saveAllThreadOperations ?? true,
     setUnreadState: true,
     createdSource: "ai_module",
     threadType: "workflow",
@@ -333,6 +384,10 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
       throw e;
     }
     const text = extractTextFromNotionResponse(notionRes);
+    // Rough estimate (≈ chars/4). Notion's endpoint doesn't report real token
+    // counts, but hard-coding 0 breaks harnesses that budget context from usage.
+    const promptTokens = Math.ceil(JSON.stringify(openaiReq.messages || []).length / 4);
+    const completionTokens = Math.ceil((text || "").length / 4);
     return res.json({
       id: `chatcmpl-${Date.now()}`,
       object: "chat.completion",
@@ -345,7 +400,11 @@ export async function handleChatCompletion(req, res, config, opts = {}) {
           finish_reason: "stop",
         },
       ],
-      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
     });
   }
 

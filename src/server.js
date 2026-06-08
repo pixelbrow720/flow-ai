@@ -33,8 +33,8 @@ import { callNotionFromBrowser } from "./puppeteer-client.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const PORT = Number(process.env.PORT || 20130);
-const HOST = process.env.HOST || "127.0.0.1";
+const PORT = Number(process.env.PORT || cfg.port || 8787);
+const HOST = process.env.HOST || cfg.host || "127.0.0.1";
 const MOCK_MODE = process.env.BRIDGE_MOCK === "1";
 
 // ── Auth check (optional) ───────────────────────────────────────────────────
@@ -61,7 +61,19 @@ function authMiddleware(req, res, next) {
 
 // ── Express app ─────────────────────────────────────────────────────────────
 const app = express();
-app.use(cors());
+// Restrict CORS to localhost origins. Server-side agents (Kilo, Claude Code,
+// Codex, …) send no Origin header and are unaffected. This blocks arbitrary
+// websites you visit from driving your Notion AI via the browser
+// (DNS-rebinding / CSRF-style abuse of an otherwise local-only port).
+const LOCALHOST_ORIGIN = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/;
+app.use(
+  cors({
+    origin: (origin, cb) =>
+      !origin || LOCALHOST_ORIGIN.test(origin)
+        ? cb(null, true)
+        : cb(new Error("CORS: origin not allowed")),
+  })
+);
 app.use(express.json({ limit: "10mb" }));
 
 // Apply auth middleware BEFORE routes

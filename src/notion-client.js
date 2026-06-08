@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Notion HTTP client â€” sends requests to Notion's internal AI endpoint.
  *
  * Endpoint: /api/v3/runInferenceTranscript (Notion 23.13.20260605.1144)
