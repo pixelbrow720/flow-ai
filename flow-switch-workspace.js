@@ -245,8 +245,23 @@ async function main() {
   log("");
 
   if (!existsSync(CONFIG_PATH)) {
-    log("ERROR: config.json not found. Run flow-setup.bat first.");
-    process.exit(1);
+    log("No config.json found -- you need first-time setup.");
+    const run = await ask("Run flow-setup now? (Y/n): ");
+    if (run.toLowerCase() !== "n") {
+      log("Launching flow-setup in a new window ...");
+      try {
+        spawn("cmd.exe", ["/c", "start", "flow-setup.bat"], {
+          cwd: __dirname,
+          detached: true,
+          stdio: "ignore",
+          shell: false,
+        }).unref();
+        log("Re-run this switcher after setup completes.");
+      } catch {
+        log("Could not auto-launch. Run flow-setup.bat manually.");
+      }
+    }
+    process.exit(0);
   }
 
   const config = JSON.parse(readFileSync(CONFIG_PATH, "utf8"));
@@ -312,6 +327,20 @@ async function main() {
     if (confirm.toLowerCase() !== "y") {
       log("Cancelled.");
       process.exit(0);
+    }
+  }
+
+  // A custom agent belongs to ONE workspace; switching invalidates it.
+  if (config.agent && config.agent.workflowId) {
+    log("");
+    log("NOTE: your configured custom agent belongs to the previous workspace");
+    log(`      (workflowId ${config.agent.workflowId}).`);
+    const drop = await ask("Clear the agent config for the new workspace? (Y/n): ");
+    if (drop.toLowerCase() !== "n") {
+      delete config.agent;
+      log("Agent config cleared. Add a new one via flow-setup or config.json.");
+    } else {
+      log("Keeping agent config -- calls may error until you set a valid agent.");
     }
   }
 

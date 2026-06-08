@@ -105,6 +105,27 @@ Then run `flow.bat` to start the bridge.
 
 ---
 
+## Capturing a Custom Agent (for Custom Agent Mode)
+
+If you want the bridge to act as a custom agent (see README -> Custom Agent
+Mode), you also need that agent's `workflowId`:
+
+1. In Notion, open your custom agent and send it any message.
+2. DevTools -> Network -> find the `POST .../runInferenceTranscript`.
+3. In the request body, copy:
+   - `workflowId` — the agent id (required)
+   - `context_page_id` (inside `context`) — optional
+4. Put them in `config.json` under `agent` (or just paste them when
+   `flow-setup.bat` prompts you):
+
+   ```json
+   "agent": { "workflowId": "<uuid>", "contextPageId": "<uuid>", "useDraft": true }
+   ```
+
+`useDraft: true` targets the unpublished draft; set it to `false` once you
+Publish the agent. In agent mode the per-request `model` is ignored — the
+model is whatever the agent itself is set to use.
+
 ## Tips tambahan
 
 - **Kalau ada banyak request AI** saat 1 prompt: yang pertama biasanya

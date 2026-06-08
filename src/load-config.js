@@ -146,3 +146,21 @@ export const bodyBuilder = typeof _raw.bodyBuilder === "function" ? _raw.bodyBui
 export const createThread = _raw.createThread;
 export const generateTitle = _raw.generateTitle;
 export const saveAllThreadOperations = _raw.saveAllThreadOperations;
+
+// ── Custom-agent mode ──────────────────────────────────────────────────────
+// When set, the bridge invokes a Notion CUSTOM AGENT instead of plain Ask-AI.
+// The agent's own instructions become the server-side system prompt — the
+// only reliable way to override Notion's built-in assistant persona.
+//
+//   "agent": {
+//     "workflowId":    "<agent workflowId / uuid>",   // REQUIRED to enable
+//     "contextPageId": "<agent context page uuid>",   // optional
+//     "useDraft":      false                          // true = use unpublished draft
+//   }
+//
+// In this mode Notion picks the model from the agent's own config, so the
+// per-request model field is dropped (model aliases are ignored).
+const _ag = _raw.agent || {};
+export const agentWorkflowId = _ag.workflowId || _raw.agentWorkflowId || null;
+export const agentContextPageId = _ag.contextPageId || _raw.agentContextPageId || null;
+export const agentUseDraft = (_ag.useDraft ?? _raw.agentUseDraft) ?? false;

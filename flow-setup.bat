@@ -5,8 +5,12 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "PF86=C:\Program Files (x86)"
 
 echo.
-echo === Notion-AI-Bridge first-time setup ===
+echo === Notion-AI-Bridge setup ===
 echo Project: %ROOT%
+echo.
+echo This logs you in to Notion, captures your session, and (optionally)
+echo points the bridge at a custom agent. If config.json already exists it
+echo is refreshed -- your apiKey and agent settings are preserved.
 echo.
 
 REM ── Prereq: Node.js ─────────────────────────────────────────────────────

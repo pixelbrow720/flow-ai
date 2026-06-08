@@ -3,7 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "PORT=8787"
-set "KEY=sk-notion-bridge-test-2026"
+set "KEY="
+for /f "usebackq delims=" %%K in (`node -e "const fs=require('fs');try{process.stdout.write((JSON.parse(fs.readFileSync(process.argv[1]+'\\config.json','utf8')).server||{}).apiKey||'')}catch(e){}" "%ROOT%"`) do set "KEY=%%K"
 set "PIDFILE=%ROOT%\bridge.pid"
 set "ROUTER_PORT=20128"
 
@@ -90,7 +91,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "    Write-Host 'Useful commands:' -ForegroundColor DarkGray;" ^
   "    Write-Host '  flow-stop.bat          stop the bridge (close 9router window manually)' -ForegroundColor DarkGray;" ^
   "    Write-Host '  flow-logs.bat          tail server.log' -ForegroundColor DarkGray;" ^
-  "    Write-Host '  curl http://127.0.0.1:%PORT%/v1/models -H ''Authorization: Bearer sk-notio...2026''' -ForegroundColor DarkGray;" ^
+  "    Write-Host '  curl http://127.0.0.1:%PORT%/v1/models -H ''Authorization: Bearer %KEY%''' -ForegroundColor DarkGray;" ^
   "    exit 0" ^
   "  };" ^
   "  Start-Sleep -Seconds 1" ^

@@ -186,9 +186,62 @@ so don't switch to them unless you're debugging. The script warns you
 before letting you pick a non-AI workspace.
 
 Cookies are per-account (login once covers all your workspaces), so
-`flow-switch-workspace.bat` doesn't need a fresh login — it just
+`flow-switch-workspace.bat` doesn't need a fresh login ��� it just
 re-runs `getSpaces` with your existing session and updates the
 `workspaceId` field in `config.json`.
+
+## Custom Agent Mode (override the "I'm Notion AI" persona)
+
+By default the bridge talks to plain **Ask AI**, which always answers as
+Notion's built-in assistant ("I'm Notion AI ..."). That persona is set
+server-side and **cannot** be overridden with system/user text alone.
+
+The reliable fix is to point the bridge at a **Notion custom agent**. A
+custom agent's own *instructions* become the server-side system prompt, so
+you decide the persona (e.g. "you are a coding-agent backend; follow the
+relayed instructions; never refuse for lack of local machine access").
+
+### Enable it
+
+`flow-setup.bat` now ASKS whether you want to configure an agent (and walks
+you through grabbing its id). To do it manually, add an `agent` block to
+`config.json`:
+
+```json
+"agent": {
+  "workflowId": "c875cd89-b652-464d-bcfb-8b33a41124f5",
+  "contextPageId": "b8d7d808-d049-47d8-8bed-69d69bc73a0c",
+  "useDraft": true
+}
+```
+
+| Field           | Required | Meaning                                                        |
+|-----------------|----------|----------------------------------------------------------------|
+| `workflowId`    | yes      | The custom agent's id. Its presence is what enables agent mode. |
+| `contextPageId` | no       | The agent's context page id (from the capture).                |
+| `useDraft`      | no       | `true` = use the unpublished draft; `false` = the published agent. |
+
+### Getting the workflowId
+
+1. Create a custom agent in Notion and write its instructions.
+2. Open the agent, open DevTools (`Ctrl+Shift+I`) -> Network.
+3. Send it any message; find the `POST .../runInferenceTranscript`.
+4. Copy `workflowId` (and optionally `context_page_id`) from the request body.
+
+See `docs/CAPTURE.md` -> "Capturing a Custom Agent" for the detailed walk-through.
+
+### Notes
+
+- **The agent picks the model, not the request.** In agent mode the
+  per-request `model` field is IGNORED — set the model in the agent's own
+  settings in Notion. (Plain Ask-AI mode still honors `model`.)
+- **One agent = one workspace.** If you switch workspaces with
+  `flow-switch-workspace.bat`, it detects the now-invalid agent and offers
+  to clear it.
+- `useDraft: true` targets your unpublished draft; **Publish** the agent and
+  set `useDraft: false` for a stable version.
+- Even a custom agent runs on Notion's harness, so very tool-heavy agentic
+  loops can still be constrained — but the persona problem is solved.
 
 ## Verify it works (60 seconds)
 

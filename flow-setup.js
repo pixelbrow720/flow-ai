@@ -14,6 +14,7 @@
 import puppeteer from "puppeteer-core";
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
+import { createInterface } from "node:readline";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -41,6 +42,22 @@ function log(...a) {
   console.log(`[setup]`, ...a);
 }
 
+function ask(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve((answer || "").trim());
+    });
+  });
+}
+
+function isUuidish(s) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    (s || "").trim()
+  );
+}
+
 async function waitForLogin(page) {
   const start = Date.now();
   while (Date.now() - start < LOGIN_TIMEOUT_MS) {
@@ -53,6 +70,68 @@ async function waitForLogin(page) {
   return false;
 }
 
+async function configureAgent(existing) {
+  log("");
+  log("---------------------------------------------------------------");
+  log("  Custom agent (optional, recommended for coding agents)");
+  log("---------------------------------------------------------------");
+  log("A Notion custom agent lets the bridge use the AGENT'S OWN");
+  log("instructions as the system prompt, instead of the built-in");
+  log("'I am Notion AI' persona. This is the most reliable way to make");
+  log("Notion act as a coding/agent backend (Kilo, Claude Code, ...).");
+  log("");
+
+  if (existing && existing.workflowId) {
+    log(`Current agent workflowId: ${existing.workflowId}`);
+    const keep = await ask("Keep this agent? (Y/n): ");
+    if (keep.toLowerCase() !== "n") return existing;
+  }
+
+  const want = await ask("Configure a custom agent now? (y/N): ");
+  if (want.toLowerCase() !== "y") {
+    log("Skipping -- the bridge will run in plain Ask-AI mode.");
+    log("Add one later by re-running setup or editing config.json");
+    log("(see README -> Custom Agent Mode).");
+    return undefined;
+  }
+
+  log("");
+  log("STEP 1 -- make sure the agent exists in Notion:");
+  log("  * Create a custom agent (e.g. 'Bridge Backend').");
+  log("  * Give it instructions describing the backend/coding role.");
+  log("  * Optionally Publish it for a stable (non-draft) version.");
+  log("");
+  log("STEP 2 -- grab its workflowId:");
+  log("  * Open the agent, open DevTools (Ctrl+Shift+I) -> Network.");
+  log("  * Send it any message; find the POST 'runInferenceTranscript'.");
+  log("  * Copy the 'workflowId' value (a UUID) from the request body.");
+  log("");
+
+  let workflowId = "";
+  while (!workflowId) {
+    const v = await ask("Paste agent workflowId (blank to skip): ");
+    if (!v) {
+      log("Skipped -- plain Ask-AI mode.");
+      return undefined;
+    }
+    if (isUuidish(v)) {
+      workflowId = v;
+    } else {
+      log("That does not look like a UUID. Try again.");
+    }
+  }
+
+  const ctx = await ask("Paste context page id (optional, blank to skip): ");
+  const draftAns = await ask("Use the unpublished DRAFT version? (y/N): ");
+
+  const agent = { workflowId };
+  if (ctx && isUuidish(ctx)) agent.contextPageId = ctx;
+  agent.useDraft = draftAns.toLowerCase() === "y";
+  log("");
+  log(`Agent configured: workflowId=${workflowId}, useDraft=${agent.useDraft}`);
+  return agent;
+}
+
 async function main() {
   const edgePath = findEdgePath();
   if (!edgePath) {
@@ -63,10 +142,18 @@ async function main() {
   }
 
   const configPath = join(__dirname, "config.json");
+  let existingConfig = null;
   if (existsSync(configPath)) {
-    log(`config.json already exists at ${configPath}`);
-    log("Delete it first if you want to re-run setup.");
-    process.exit(0);
+    try {
+      existingConfig = JSON.parse(readFileSync(configPath, "utf8"));
+    } catch {
+      existingConfig = null;
+    }
+    log(`Existing config.json detected at ${configPath}`);
+    log("Re-running setup REFRESHES your login (cookies + workspace) and");
+    log("PRESERVES your existing apiKey and agent settings.");
+  } else {
+    log("No config.json found -- running first-time setup.");
   }
 
   const userDataDir = `C:\\Users\\${process.env.USERNAME || "User"}\\AppData\\Local\\Temp\\notion-bridge-setup-${Date.now()}`;
@@ -168,24 +255,38 @@ async function main() {
   }
 
   const cookieString = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-  const apiKey = `sk-bridge-${randomBytes(12).toString("hex")}`;
+  // Preserve an existing apiKey on refresh; otherwise mint a fresh one.
+  const apiKey =
+    existingConfig?.server?.apiKey ||
+    `sk-bridge-${randomBytes(12).toString("hex")}`;
 
   const config = {
+    ...(existingConfig || {}),
     notion: {
-      endpoint: DEFAULT_ENDPOINT,
+      ...(existingConfig?.notion || {}),
+      endpoint: existingConfig?.notion?.endpoint || DEFAULT_ENDPOINT,
       userId,
       workspaceId,
-      clientVersion: DEFAULT_CLIENT_VERSION,
+      clientVersion:
+        existingConfig?.notion?.clientVersion || DEFAULT_CLIENT_VERSION,
     },
     browser: {
+      ...(existingConfig?.browser || {}),
       cookies: cookieString,
     },
     server: {
-      host: "127.0.0.1",
-      port: 8787,
+      host: existingConfig?.server?.host || "127.0.0.1",
+      port: existingConfig?.server?.port || 8787,
       apiKey,
     },
   };
+
+  // ── Custom-agent step ────────────────────────────────────────────────────
+  // Optionally point the bridge at a Notion custom agent so the agent's own
+  // instructions become the system prompt (overrides the built-in persona).
+  delete config.agent;
+  const agent = await configureAgent(existingConfig?.agent);
+  if (agent && agent.workflowId) config.agent = agent;
 
   writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf8");
 
@@ -198,6 +299,12 @@ async function main() {
   log(`  apiKey:      ${apiKey}`);
   log(`  cookies:     ${cookies.length} cookies`);
   log(`  file:        ${configPath}`);
+  log("");
+  if (config.agent && config.agent.workflowId) {
+    log(`  agent:       ${config.agent.workflowId} (custom-agent mode ON)`);
+  } else {
+    log("  agent:       (none -- plain Ask-AI mode)");
+  }
   log("");
   log("  >>> Next step: double-click flow.bat to start the bridge. <<<");
   log("");
